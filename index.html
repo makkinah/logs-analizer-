@@ -15,7 +15,7 @@ main{max-width:1100px;margin:0 auto;padding:20px}h1{font-size:22px;margin:0 0 4p
 .crit{color:var(--crit)}.warn{color:var(--warn)}.info{color:var(--info)}.ok{color:var(--ok)}
 .tbl{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
 tr.crit td:first-child{border-left:3px solid var(--crit)}tr.warn td:first-child{border-left:3px solid var(--warn)}th{color:var(--mut);font-weight:600}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.plot{height:300px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}.grid>.card{min-width:0;margin-bottom:0;overflow:hidden}.plot{height:340px;width:100%}
 ul{margin:6px 0 0;padding-left:20px}.big{font-size:17px;font-weight:600}label{margin-right:14px;font-size:13px}
 #status{color:var(--mut);margin:10px 0}.mut{color:var(--mut)}
 </style>
@@ -112,9 +112,13 @@ function plots() {
   for (const [title, traces] of Object.entries(R.plots)) {
     const div = document.createElement('div'); div.className = 'card'; div.innerHTML = `<h2>${esc(title)}</h2><div class="plot"></div>`; $('plots').appendChild(div);
     const xs = traces.flatMap(t => t.x.filter(v => v !== null)), lo = Math.min(-20, ...xs.map(v => v)), hi = Math.max(...xs);
-    Plotly.newPlot(div.querySelector('.plot'), traces.map(t => ({x: t.x, y: t.y, name: t.name, mode: 'lines', connectgaps: false})), {
-      margin: {l: 45, r: 10, t: 6, b: 36}, shapes, xaxis: {title: 's desde el despegue', range: [Math.max(lo, -30), hi]}, legend: {orientation: 'h', y: -0.3},
+    const ax = {gridcolor: dark ? '#2a303a' : '#e2e5ea', zerolinecolor: dark ? '#475467' : '#98a2b3', linecolor: dark ? '#475467' : '#98a2b3'};
+    Plotly.newPlot(div.querySelector('.plot'), traces.map(t => ({x: t.x, y: t.y, name: t.name, mode: 'lines', connectgaps: false, line: {width: 1.4}})), {
+      autosize: true, margin: {l: 50, r: 16, t: 8, b: 90}, shapes, hovermode: 'x unified',
+      xaxis: {...ax, title: {text: 's desde el despegue', standoff: 8}, range: [Math.max(lo, -30), hi]}, yaxis: ax,
+      legend: {orientation: 'h', x: 0, y: -0.32, yanchor: 'top'},
       paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: fg, size: 12}}, {responsive: true, displaylogo: false});
+    requestAnimationFrame(() => Plotly.Plots.resize(div.querySelector('.plot')));
   }
 }
 </script>
