@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Analizador de logs</title>
+<title>DronePix · Analizador de logs</title>
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#667085;--bd:#e2e5ea;--crit:#d92d20;--warn:#b54708;--info:#475467;--ok:#067647;--accent:#2457d6}
 @media(prefers-color-scheme:dark){:root{--bg:#0f1217;--card:#181c23;--tx:#e8eaee;--mut:#98a2b3;--bd:#2a303a;--crit:#f97066;--warn:#fdb022;--info:#98a2b3;--ok:#47cd89;--accent:#7ba2ff}}
@@ -22,7 +22,7 @@ ul{margin:6px 0 0;padding-left:20px}.big{font-size:17px;font-weight:600}label{ma
 </head>
 <body>
 <main>
-  <h1>Analizador de logs</h1>
+  <h1>🛸 DronePix · Analizador de logs</h1>
   <p class="sub">Sube el log del PX4 (<code>.ulg</code>) y/o del Hivemind (<code>.ulog</code>). Todo se procesa en tu navegador: los archivos no se suben a ningún servidor.</p>
   <div id="drop" class="card">Arrastra aquí los logs o haz clic para elegirlos (puedes subir varios a la vez)
     <input id="file" type="file" multiple accept=".ulg,.ulog" hidden></div>
@@ -39,6 +39,7 @@ let R = null;
 
 async function init() {
   py = await loadPyodide();
+  await py.loadPackage('numpy');
   py.runPython(await (await fetch('analyzer.py?v=' + Date.now())).text());
   $('status').textContent = 'Listo. Sube tus logs.';
 }
