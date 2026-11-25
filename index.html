@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analizador de logs</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#667085;--bd:#e2e5ea;--crit:#d92d20;--warn:#b54708;--info:#475467;--ok:#067647;--accent:#2457d6}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1217;--card:#181c23;--tx:#e8eaee;--mut:#98a2b3;--bd:#2a303a;--crit:#f97066;--warn:#fdb022;--info:#98a2b3;--ok:#47cd89;--accent:#7ba2ff}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:20px}h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:0 0 10px}
+.sub{color:var(--mut);margin:0 0 16px}.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px;margin-bottom:14px}
+#drop{border:2px dashed var(--bd);text-align:center;padding:28px;cursor:pointer;border-radius:10px}#drop.over{border-color:var(--accent)}
+.badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;border:1px solid var(--bd);margin-left:6px}
+.crit{color:var(--crit)}.warn{color:var(--warn)}.info{color:var(--info)}.ok{color:var(--ok)}
+.tbl{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+tr.crit td:first-child{border-left:3px solid var(--crit)}tr.warn td:first-child{border-left:3px solid var(--warn)}th{color:var(--mut);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.plot{height:300px}
+ul{margin:6px 0 0;padding-left:20px}.big{font-size:17px;font-weight:600}label{margin-right:14px;font-size:13px}
+#status{color:var(--mut);margin:10px 0}.mut{color:var(--mut)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Analizador de logs</h1>
+  <p class="sub">Sube el log del PX4 (<code>.ulg</code>) y/o del Hivemind (<code>.ulog</code>). Todo se procesa en tu navegador: los archivos no se suben a ningún servidor.</p>
+  <div id="drop" class="card">Arrastra aquí los logs o haz clic para elegirlos (puedes subir varios a la vez)
+    <input id="file" type="file" multiple accept=".ulg,.ulog" hidden></div>
+  <div id="status">Cargando motor de análisis (Python en el navegador, la primera vez demora unos segundos)…</div>
+  <div id="out"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script>
+let py; const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const mmss = s => (s < 0 ? '-' : '+') + Math.floor(Math.abs(s) / 60) + ':' + String(Math.floor(Math.abs(s) % 60)).padStart(2, '0');
+let R = null;
+
+async function init() {
+  py = await loadPyodide();
+  py.runPython(await (await fetch('analyzer.py?v=' + Date.now())).text());
+  $('status').textContent = 'Listo. Sube tus logs.';
+}
+init().catch(e => $('status').textContent = 'Error cargando el motor: ' + e + ' (si abriste el archivo con doble clic, sírvelo con "python -m http.server" o súbelo a GitHub Pages)');
+
+const drop = $('drop'), inp = $('file');
+drop.onclick = () => inp.click(); inp.onchange = () => run(inp.files);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); }; drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); run(e.dataTransfer.files); };
+
+async function run(files) {
+  if (!py) { $('status').textContent = 'El motor aún está cargando…'; return; }
+  $('status').textContent = 'Analizando…'; await new Promise(r => setTimeout(r, 30));
+  try {
+    const names = [];
+    for (const f of files) { py.FS.writeFile('/tmp/' + f.name, new Uint8Array(await f.arrayBuffer())); names.push(f.name); }
+    py.globals.set('NAMES', names);
+    R = JSON.parse(py.runPython("analyze([(n, open('/tmp/'+n,'rb').read()) for n in NAMES.to_py()])"));
+    render(); $('status').textContent = 'Análisis terminado.';
+  } catch (e) { $('status').textContent = 'Error: ' + e; }
+}
+
+function when(e) { // hora local Chile + UTC
+  const d = new Date((R.ref + e.rel) * 1000);
+  return (e.approx ? '~' : '') + d.toLocaleTimeString('es-CL', {timeZone: 'America/Santiago', hour12: false}) + ' CL · ' + d.toISOString().substr(11, 8) + ' UTC';
+}
+
+function render() {
+  let h = '';
+  if (R.errors.length) h += `<div class="card crit"><b>No se pudo leer:</b><ul>${R.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>`;
+  // ¿mismo vuelo?
+  for (const p of R.pairs) {
+    const cls = p.level === 'same' ? 'ok' : p.level === 'drone' ? 'warn' : 'crit';
+    h += `<div class="card"><h2>¿Son del mismo vuelo? <span class="mut">${esc(p.px4)} ↔ ${esc(p.hm)}</span></h2>
+      <div class="big ${cls}">${p.level === 'same' ? '✅' : '⚠️'} ${esc(p.verdict)}</div><ul>` +
+      p.checks.map(c => `<li>${c[1] === true ? '✅' : c[1] === false ? '❌' : '➖'} ${esc(c[0])} <span class="mut">· ${esc(c[2])}</span></li>`).join('') + '</ul>';
+    if (p.level === 'same' && p.coverage !== null)
+      h += `<p>El Hivemind cubre el <b>${Math.round(p.coverage * 100)}%</b> del vuelo del PX4${p.hm_trunc ? ' (su log está incompleto)' : ''}.` +
+        (p.uncovered && p.uncovered.length ? ` <span class="crit">Eventos críticos sin datos del Hivemind: ${p.uncovered.map(esc).join('; ')}.</span>` : '') + '</p>';
+    h += '</div>';
+  }
+  // resumen por archivo
+  for (const f of R.files) {
+    const n = s => f.events.filter(e => e.sev === s).length;
+    h += `<div class="card"><h2>${esc(f.name)} <span class="badge">${f.kind}</span>` +
+      (f.trunc ? '<span class="badge crit">INCOMPLETO</span>' : '') + (f.repaired ? '<span class="badge warn">cabecera reparada</span>' : '') +
+      `<span class="badge crit">${n('crit')} críticos</span><span class="badge warn">${n('warn')} avisos</span></h2>` +
+      '<ul>' + f.summary.map(s => `<li>${esc(s)}</li>`).join('') + '</ul></div>';
+  }
+  // puntos críticos
+  const crit = R.files.flatMap(f => f.events.filter(e => e.sev === 'crit')).sort((a, b) => a.rel - b.rel);
+  h += `<div class="card"><h2>🔴 Puntos críticos</h2>` + (crit.length ? '<ul>' + crit.map(e => `<li><b>${mmss(e.rel)}</b> (${esc(e.src)}) ${esc(e.title)} <span class="mut">${esc(e.detail)}</span></li>`).join('') + '</ul>' : '<p class="ok">No se detectaron eventos críticos.</p>') +
+    '<p class="mut">Tiempos relativos al despegue.</p></div>';
+  // línea de tiempo
+  h += `<div class="card"><h2>Línea de tiempo</h2><label><input type="checkbox" id="fInfo"> mostrar informativos</label><label><input type="checkbox" id="fPre"> mostrar preflight</label><div class="tbl"><table><thead><tr><th>t</th><th>Hora</th><th>Fuente</th><th>Evento</th><th>Detalle</th></tr></thead><tbody id="tb"></tbody></table></div></div>`;
+  h += '<div class="grid" id="plots"></div>';
+  $('out').innerHTML = h; $('fInfo').onchange = $('fPre').onchange = table; table(); plots();
+}
+
+function table() {
+  const info = $('fInfo').checked, pre = $('fPre').checked;
+  const ev = R.files.flatMap(f => f.events).filter(e => (info || e.sev !== 'info') && (pre || e.cat !== 'preflight' && !(e.rel < -60 && e.sev !== 'crit'))).sort((a, b) => a.rel - b.rel);
+  $('tb').innerHTML = ev.map(e => `<tr class="${e.sev}"><td>${mmss(e.rel)}</td><td>${when(e)}</td><td>${esc(e.src)}</td><td class="${e.sev}">${esc(e.title)}</td><td>${esc(e.detail)}</td></tr>`).join('') || '<tr><td colspan="5">Sin eventos.</td></tr>';
+}
+
+function plots() {
+  const ev = R.files.flatMap(f => f.events).filter(e => !e.approx && e.sev !== 'info' && e.rel > -30);
+  const shapes = ev.map(e => ({type: 'line', x0: e.rel, x1: e.rel, yref: 'paper', y0: 0, y1: 1, line: {color: e.sev === 'crit' ? '#d92d20' : '#f79009', width: 1.5, dash: e.sev === 'crit' ? 'solid' : 'dot'}}));
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches, fg = dark ? '#e8eaee' : '#1b1f24';
+  for (const [title, traces] of Object.entries(R.plots)) {
+    const div = document.createElement('div'); div.className = 'card'; div.innerHTML = `<h2>${esc(title)}</h2><div class="plot"></div>`; $('plots').appendChild(div);
+    const xs = traces.flatMap(t => t.x.filter(v => v !== null)), lo = Math.min(-20, ...xs.map(v => v)), hi = Math.max(...xs);
+    Plotly.newPlot(div.querySelector('.plot'), traces.map(t => ({x: t.x, y: t.y, name: t.name, mode: 'lines', connectgaps: false})), {
+      margin: {l: 45, r: 10, t: 6, b: 36}, shapes, xaxis: {title: 's desde el despegue', range: [Math.max(lo, -30), hi]}, legend: {orientation: 'h', y: -0.3},
+      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {color: fg, size: 12}}, {responsive: true, displaylogo: false});
+  }
+}
+</script>
+</body>
+</html>
